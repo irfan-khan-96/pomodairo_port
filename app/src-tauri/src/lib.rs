@@ -1,0 +1,90 @@
+mod audio;
+mod config;
+mod db;
+mod db_location;
+mod error;
+mod settings;
+mod settings_service;
+mod stats;
+mod stats_service;
+mod task_service;
+mod tasks;
+mod timer;
+mod timer_service;
+mod tray;
+mod window_service;
+
+use tauri::Manager;
+
+use config::ConfigStore;
+use settings_service::SettingsService;
+use task_service::TaskService;
+use timer_service::TimerService;
+use window_service::WindowService;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        // Must be registered first: a second launch just brings this instance forward.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_main(app);
+        }))
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let db_path = db_location::resolve(app.handle())?;
+            app.manage(TaskService::open(&db_path)?);
+            let settings = SettingsService::new(ConfigStore::open(&db_path)?);
+            app.manage(TimerService::new(&settings.current()));
+            app.manage(settings);
+            app.manage(WindowService::new(ConfigStore::open(&db_path)?));
+            if let Err(e) = window_service::restore(app.handle()) {
+                // Never leave the (initially hidden) window invisible.
+                eprintln!("window: failed to restore preferences: {e}");
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.show();
+                }
+            }
+            if let Err(e) = tray::create(app.handle()) {
+                // Some Linux desktops have no tray; the app works without it.
+                eprintln!("tray: unavailable: {e}");
+            }
+            timer_service::spawn_tick_loop(app.handle().clone());
+            Ok(())
+        })
+        .on_window_event(window_service::on_window_event)
+        .invoke_handler(tauri::generate_handler![
+            timer_service::timer_snapshot,
+            timer_service::timer_start,
+            timer_service::timer_stop,
+            task_service::tasks_state,
+            task_service::task_create,
+            task_service::task_update,
+            task_service::task_select,
+            task_service::task_set_done,
+            task_service::task_delete,
+            task_service::task_reorder,
+            task_service::tasks_hide_done,
+            task_service::task_log_disturbance,
+            window_service::window_prefs,
+            window_service::window_set_view,
+            window_service::window_toggle_mini,
+            window_service::window_set_always_on_top,
+            window_service::window_set_remember_position,
+            settings_service::settings_get,
+            settings_service::settings_save,
+            settings_service::sound_preview,
+            settings_service::open_settings_window,
+            db_location::database_location,
+            db_location::database_move,
+            stats_service::stats_completed,
+            stats_service::stats_disturbances,
+            stats_service::stats_per_day,
+            stats_service::stats_reality,
+            stats_service::stats_hashtags,
+            stats_service::open_stats_window,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

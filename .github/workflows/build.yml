@@ -1,0 +1,108 @@
+# Builds and tests Pomodairo on Windows, macOS and Linux (Debian/Ubuntu).
+#
+# - Every push and pull request: run the tests, build the installers, and attach
+#   them to the run as downloadable artifacts.
+# - Pushing a tag like `v0.2.0`: additionally creates a *draft* GitHub release with
+#   the installers attached, to review and publish by hand.
+#
+# Installers are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper
+# will warn on first launch.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write # needed to create the draft release on tags
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: --bundles nsis,msi
+          - name: macOS (universal)
+            os: macos-latest
+            args: --target universal-apple-darwin --bundles app,dmg
+          # Built on the oldest supported Ubuntu so the .deb's glibc requirement
+          # also covers Debian 12.
+          - name: Debian / Ubuntu
+            os: ubuntu-22.04
+            args: --bundles deb
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libasound2-dev libxdo-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+
+      - name: Install npm packages
+        run: npm ci
+
+      - name: Type-check the frontend
+        run: npm run check
+
+      - name: Rust tests
+        working-directory: app/src-tauri
+        run: cargo test --locked --lib
+
+      - name: Build installers
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          args: ${{ matrix.args }}
+          # Only tag pushes create a (draft) release; other runs just build.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          releaseName: Pomodairo ${{ github.ref_name }}
+          releaseBody: See the assets below to download Pomodairo for your platform.
+          releaseDraft: true
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: pomodairo-${{ runner.os }}
+          path: |
+            app/src-tauri/target/release/bundle/nsis/*.exe
+            app/src-tauri/target/release/bundle/msi/*.msi
+            app/src-tauri/target/release/bundle/deb/*.deb
+            app/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
