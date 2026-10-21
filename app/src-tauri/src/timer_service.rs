@@ -189,7 +189,7 @@ fn apply_side_effects(app: &AppHandle, svc: &TimerService, event: TimerEvent) {
             notify(app, svc, "Pomodoro finished", &body);
         }
         TimerEvent::BreakEnded => {
-            audio.play_alarm();
+            audio.play_break_end();
             demand_attention(app, UserAttentionType::Informational);
             let next = active_task(app)
                 .map(|t| format!(" Next up: {t}."))

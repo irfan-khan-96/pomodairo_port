@@ -14,8 +14,10 @@ use std::time::{Duration, Instant};
 use rodio::{Decoder, DeviceSinkBuilder, MixerDeviceSink, Player, Source};
 use serde::Deserialize;
 
-const ALARM_MP3: &[u8] = include_bytes!("../resources/sounds/alarm.mp3");
-const TICKING_MP3: &[u8] = include_bytes!("../resources/sounds/ticking.mp3");
+// Built-in sounds, synthesised by app/scripts/make-sounds.py.
+const ALARM_WAV: &[u8] = include_bytes!("../resources/sounds/alarm.wav");
+const BREAK_END_WAV: &[u8] = include_bytes!("../resources/sounds/break-end.wav");
+const TICK_WAV: &[u8] = include_bytes!("../resources/sounds/tick.wav");
 
 /// Ticking fades from this volume to silence over `TICK_FADE` (as in the original app).
 const TICK_FADE_FROM: f32 = 0.7;
@@ -29,7 +31,8 @@ pub struct SoundSettings {
     pub fade_ticking: bool,
     /// 0.0 – 1.0
     pub volume: f32,
-    /// Custom sound files; `None` uses the built-in sounds.
+    /// Custom sound files; `None` uses the built-in sounds. A custom alarm is
+    /// used for both the end of a pomodoro and the end of a break.
     pub alarm_file: Option<PathBuf>,
     pub ticking_file: Option<PathBuf>,
 }
@@ -49,12 +52,16 @@ impl Default for SoundSettings {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SoundKind {
+    /// End of a pomodoro.
     Alarm,
+    /// End of a break (built-in: a softer chime than the alarm).
+    BreakEnd,
     Ticking,
 }
 
 enum Command {
-    PlayAlarm,
+    /// `Alarm` or `BreakEnd`.
+    PlayAlarm(SoundKind),
     StartTicking,
     StopTicking,
     Configure(SoundSettings),
@@ -81,8 +88,14 @@ impl Audio {
         Self { tx }
     }
 
+    /// The sound for the end of a pomodoro.
     pub fn play_alarm(&self) {
-        let _ = self.tx.send(Command::PlayAlarm);
+        let _ = self.tx.send(Command::PlayAlarm(SoundKind::Alarm));
+    }
+
+    /// The sound for the end of a break.
+    pub fn play_break_end(&self) {
+        let _ = self.tx.send(Command::PlayAlarm(SoundKind::BreakEnd));
     }
 
     pub fn start_ticking(&self) {
@@ -112,22 +125,39 @@ pub fn decode_check(path: &Path) -> Result<(), String> {
 
 type Sound = Arc<[u8]>;
 
-/// The configured sound, falling back to the built-in one if the file is unreadable.
-fn load(file: Option<&Path>, builtin: &'static [u8]) -> Sound {
-    if let Some(path) = file {
-        match std::fs::read(path) {
-            Ok(bytes) if Decoder::new(Cursor::new(bytes.clone())).is_ok() => return bytes.into(),
-            Ok(_) => eprintln!(
+/// A custom sound file, or `None` (built-in) if unset or unreadable.
+fn load_custom(file: Option<&Path>) -> Option<Sound> {
+    let path = file?;
+    match std::fs::read(path) {
+        Ok(bytes) if Decoder::new(Cursor::new(bytes.clone())).is_ok() => Some(bytes.into()),
+        Ok(_) => {
+            eprintln!(
                 "audio: {} is not playable, using built-in sound",
                 path.display()
-            ),
-            Err(e) => eprintln!(
+            );
+            None
+        }
+        Err(e) => {
+            eprintln!(
                 "audio: cannot read {}: {e}, using built-in sound",
                 path.display()
-            ),
+            );
+            None
         }
     }
-    Arc::from(builtin)
+}
+
+fn builtin(kind: SoundKind) -> Sound {
+    Arc::from(match kind {
+        SoundKind::Alarm => ALARM_WAV,
+        SoundKind::BreakEnd => BREAK_END_WAV,
+        SoundKind::Ticking => TICK_WAV,
+    })
+}
+
+/// The custom alarm (used for both alarm kinds) or the built-in sound for `kind`.
+fn alarm_for(custom: &Option<Sound>, kind: SoundKind) -> Sound {
+    custom.clone().unwrap_or_else(|| builtin(kind))
 }
 
 struct Ticking {
@@ -148,8 +178,9 @@ fn run(rx: Receiver<Command>, settings: SoundSettings) {
             None
         }
     };
-    let mut alarm_sound = load(settings.alarm_file.as_deref(), ALARM_MP3);
-    let mut ticking_sound = load(settings.ticking_file.as_deref(), TICKING_MP3);
+    let mut custom_alarm = load_custom(settings.alarm_file.as_deref());
+    let mut ticking_sound = load_custom(settings.ticking_file.as_deref())
+        .unwrap_or_else(|| builtin(SoundKind::Ticking));
     let mut settings = settings;
     let mut alarm: Option<Player> = None;
     let mut ticking: Option<Ticking> = None;
@@ -180,13 +211,14 @@ fn run(rx: Receiver<Command>, settings: SoundSettings) {
         };
 
         match rx.recv_timeout(timeout) {
-            Ok(Command::PlayAlarm) => {
+            Ok(Command::PlayAlarm(kind)) => {
                 ticking = None;
                 alarm = None;
                 if settings.enabled {
+                    let sound = alarm_for(&custom_alarm, kind);
                     alarm = sink
                         .as_ref()
-                        .and_then(|s| play(s, alarm_sound.clone(), settings.volume, false));
+                        .and_then(|s| play(s, sound, settings.volume, false));
                 }
             }
             Ok(Command::StartTicking) => {
@@ -198,10 +230,11 @@ fn run(rx: Receiver<Command>, settings: SoundSettings) {
             Ok(Command::StopTicking) => ticking = None,
             Ok(Command::Configure(new)) => {
                 if new.alarm_file != settings.alarm_file {
-                    alarm_sound = load(new.alarm_file.as_deref(), ALARM_MP3);
+                    custom_alarm = load_custom(new.alarm_file.as_deref());
                 }
                 if new.ticking_file != settings.ticking_file {
-                    ticking_sound = load(new.ticking_file.as_deref(), TICKING_MP3);
+                    ticking_sound = load_custom(new.ticking_file.as_deref())
+                        .unwrap_or_else(|| builtin(SoundKind::Ticking));
                 }
                 settings = new;
                 if !settings.enabled {
@@ -212,15 +245,13 @@ fn run(rx: Receiver<Command>, settings: SoundSettings) {
             Ok(Command::Preview { kind, file, volume }) => {
                 ticking = None;
                 alarm = None;
+                let sound = load_custom(file.as_deref()).unwrap_or_else(|| builtin(kind));
                 match kind {
-                    SoundKind::Alarm => {
-                        let sound = load(file.as_deref(), ALARM_MP3);
+                    SoundKind::Alarm | SoundKind::BreakEnd => {
                         alarm = sink.as_ref().and_then(|s| play(s, sound, volume, false));
                     }
                     // Always faded, so the preview stops on its own.
-                    SoundKind::Ticking => {
-                        ticking = start_ticking(&load(file.as_deref(), TICKING_MP3), volume, true);
-                    }
+                    SoundKind::Ticking => ticking = start_ticking(&sound, volume, true),
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -261,4 +292,25 @@ fn play(sink: &MixerDeviceSink, sound: Sound, volume: f32, looped: bool) -> Opti
         player.append(decoder);
     }
     Some(player)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn built_in_sounds_decode() {
+        for kind in [SoundKind::Alarm, SoundKind::BreakEnd, SoundKind::Ticking] {
+            let decoder = Decoder::new(Cursor::new(builtin(kind))).expect("decodes");
+            assert!(decoder.total_duration().is_some_and(|d| d > Duration::ZERO), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn custom_alarm_replaces_both_alarm_kinds() {
+        let custom: Option<Sound> = Some(Arc::from(&b"custom"[..]));
+        assert_eq!(&*alarm_for(&custom, SoundKind::BreakEnd), b"custom");
+        assert_eq!(&*alarm_for(&None, SoundKind::BreakEnd), BREAK_END_WAV);
+        assert_eq!(&*alarm_for(&None, SoundKind::Alarm), ALARM_WAV);
+    }
 }

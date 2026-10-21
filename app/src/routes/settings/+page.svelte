@@ -78,10 +78,12 @@
     if (typeof picked === "string") draft.sound[fileKey(kind)] = picked;
   }
 
-  async function preview(kind: SoundKind) {
+  /** Break end uses the custom alarm when one is set, else its own built-in chime. */
+  async function preview(kind: SoundKind | "break_end") {
     error = null;
+    const file = kind === "break_end" ? draft.sound.alarm_file : draft.sound[fileKey(kind)];
     try {
-      await invoke("sound_preview", { kind, file: draft.sound[fileKey(kind)], volume: draft.sound.volume });
+      await invoke("sound_preview", { kind, file, volume: draft.sound.volume });
     } catch (e) {
       error = String(e);
     }
@@ -156,6 +158,15 @@
         <input type="checkbox" bind:checked={draft.sound.fade_ticking} /> Fade the ticking out after a few seconds
       </label>
       {@render soundFile("alarm", "Alarm sound")}
+      <div class="field">
+        <span>Break over sound</span>
+        <div class="row">
+          <small class="grow">
+            {draft.sound.alarm_file ? "Uses the alarm sound above." : "A softer chime, so you can tell it from the alarm."}
+          </small>
+          <button class="icon" title="Play" aria-label="Play break over sound" onclick={() => preview("break_end")}>▶</button>
+        </div>
+      </div>
       {@render soundFile("ticking", "Ticking sound")}
     {:else}
       <div class="field">
@@ -282,9 +293,14 @@
     gap: 6px;
   }
 
-  .row input {
+  .row input,
+  .row .grow {
     flex: 1;
     min-width: 0;
+  }
+
+  .row .grow {
+    align-self: center;
   }
 
   input[type="text"],

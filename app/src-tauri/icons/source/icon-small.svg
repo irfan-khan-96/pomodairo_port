@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Pomodairo app icon, 16-32px variant: the segments merge into a solid
+       ring so the tomato still reads at tiny sizes. -->
+  <rect x="32" y="32" width="960" height="960" rx="200" fill="#262626"/>
+  <rect x="172" y="250" width="680" height="640" rx="300" fill="none" stroke="#ee4f3b" stroke-width="130"/>
+  <g fill="#5cc05f">
+    <path d="M512 290 C440 200 330 196 220 250 C330 280 430 300 512 330 Z"/>
+    <path d="M512 290 C584 200 694 196 804 250 C694 280 594 300 512 330 Z"/>
+    <path d="M476 300 C470 230 486 170 540 120 C568 132 578 150 568 166 C534 206 524 252 548 300 Z"/>
+  </g>
+</svg>

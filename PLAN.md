@@ -12,7 +12,8 @@ Milestones 1–8 are implemented. Differences from the plan below, decided along
 - **The database location** is stored in `database-location.txt` in the app config folder, since it can't live inside the database. Moving it copies the database if the target folder has none, then restarts.
 - **`schema_version` table → `PRAGMA user_version`** for migrations.
 - **Statistics "Count" view** counts pomodoros from the pomodoro log by the day they were completed. The original counted by the day the task was created.
-- **Not yet done:** a high-resolution app icon (the current one is upscaled from the original's 128px), code signing, auto-update.
+- **Icon and sounds** are original and generated from source: a "segment tomato" app icon (SVG), a live progress-ring tray icon drawn in Rust, and a synthesised "soft digital" sound set with a distinct break-over chime.
+- **Not yet done:** code signing, auto-update.
 
 ## 1. Decisions
 

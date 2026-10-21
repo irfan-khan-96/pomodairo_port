@@ -1,16 +1,27 @@
-//! System tray icon: a live countdown in the tooltip (and next to the icon on
-//! macOS / Linux), plus a menu to start/stop the timer, show the window, or quit.
+//! System tray icon: a progress ring showing the time left (see `tray_icon`), a
+//! live countdown in the tooltip (and next to the icon on macOS / Linux), plus a
+//! menu to start/stop the timer, show the window, or quit.
 
+use std::sync::Mutex;
+
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, Wry};
 
 use crate::timer::{BreakKind, Phase, TimerSnapshot};
+use crate::tray_icon::{self, IconKey};
 
 const TRAY_ID: &str = "main";
 
 pub struct TrayState {
     toggle: MenuItem<Wry>,
+    /// The icon currently shown, so it is only redrawn when the ring changes.
+    icon: Mutex<Option<IconKey>>,
+}
+
+fn ring_image(key: IconKey) -> Image<'static> {
+    Image::new_owned(key.render(), tray_icon::SIZE, tray_icon::SIZE)
 }
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
@@ -22,7 +33,15 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         &[&toggle, &show, &PredefinedMenuItem::separator(app)?, &quit],
     )?;
 
-    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
+    let idle = IconKey::for_snapshot(&TimerSnapshot {
+        phase: Phase::Idle,
+        break_kind: None,
+        remaining_secs: 0,
+        total_secs: 0,
+        completed: 0,
+    });
+    TrayIconBuilder::with_id(TRAY_ID)
+        .icon(ring_image(idle))
         .tooltip("Pomodairo")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -45,12 +64,12 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             {
                 show_main(tray.app_handle());
             }
-        });
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
-    }
-    builder.build(app)?;
-    app.manage(TrayState { toggle });
+        })
+        .build(app)?;
+    app.manage(TrayState {
+        toggle,
+        icon: Mutex::new(Some(idle)),
+    });
     Ok(())
 }
 
@@ -64,6 +83,11 @@ pub fn update(app: &AppHandle, snapshot: &TimerSnapshot, task: Option<&str>) {
     let _ = tray.set_title(Some(countdown(snapshot).unwrap_or_default()));
     if let Some(state) = app.try_state::<TrayState>() {
         let _ = state.toggle.set_text(toggle_label(snapshot.phase));
+        let key = IconKey::for_snapshot(snapshot);
+        let changed = state.icon.lock().unwrap().replace(key) != Some(key);
+        if changed {
+            let _ = tray.set_icon(Some(ring_image(key)));
+        }
     }
 }
 

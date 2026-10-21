@@ -12,6 +12,7 @@ mod tasks;
 mod timer;
 mod timer_service;
 mod tray;
+mod tray_icon;
 mod window_service;
 
 use tauri::Manager;

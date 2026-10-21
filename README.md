@@ -10,7 +10,7 @@ statistics, for Windows, macOS and Linux (Debian/Ubuntu), built with
 - Task list with estimates and counts of pomodoros, unplanned items and interruptions (E/P/U/I)
 - Mini, short and full views; always-on-top; remembers window position and size
 - Statistics: finished tasks, interruptions, pomodoros per day and the weekly "reality factor"
-- Tray icon with a live countdown, desktop notifications, single instance
+- Tray icon with a live progress ring and countdown, desktop notifications, single instance
 - Data in a local SQLite database whose folder you can move (e.g. into a synced folder)
 
 ## Development
@@ -47,6 +47,14 @@ npm run check
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 ```
 
+## Icons and sounds
+
+Both are generated from source, so they can be tweaked and regenerated:
+
+- **Icons:** edit `src-tauri/icons/source/icon.svg` (48px and up) or `icon-small.svg` (16–32px), then run `npm run icons` from `app/`.
+- **Sounds:** edit and run `python scripts/make-sounds.py` from `app/` (standard library only). It writes `tick.wav`, `alarm.wav` and `break-end.wav` to `src-tauri/resources/sounds/`.
+- **Tray icon:** the progress ring is drawn at runtime by `src-tauri/src/tray_icon.rs`.
+
 ## Building installers
 
 From `app/`, `npm run tauri build` builds the installers for the current OS into
@@ -74,6 +82,7 @@ app/
   src/                 Svelte UI (main window, settings, statistics)
   src-tauri/src/       Rust: timer engine, database, audio, tray, window handling
   src-tauri/migrations SQLite schema
+  scripts/             Icon and sound generators
 PLAN.md                Design decisions and milestones
 ```
 

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Pomodairo app icon (48px and up): a tomato drawn as a lit seven-segment
+       "0" (middle segment unlit) under a green calyx. icon-small.svg is the
+       simplified 16-32px variant. Regenerate with app/scripts/make-icons.mjs. -->
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#262626"/>
+
+  <!-- Unlit middle segment. -->
+  <rect x="290" y="512" width="444" height="100" rx="50" fill="#333333"/>
+
+  <!-- Lit segments: top, bottom, and the four sides. -->
+  <g fill="#ee4f3b">
+    <rect x="290" y="262" width="444" height="100" rx="50"/>
+    <rect x="290" y="762" width="444" height="100" rx="50"/>
+    <rect x="168" y="330" width="100" height="212" rx="50"/>
+    <rect x="756" y="330" width="100" height="212" rx="50"/>
+    <rect x="168" y="582" width="100" height="212" rx="50"/>
+    <rect x="756" y="582" width="100" height="212" rx="50"/>
+  </g>
+
+  <!-- Calyx: broad sepals over the top segment, and a short curved stem. -->
+  <g fill="#4caf50">
+    <path d="M512 300 C452 236 362 226 262 262 C352 288 434 312 512 334 Z"/>
+    <path d="M512 300 C572 236 662 226 762 262 C672 288 590 312 512 334 Z"/>
+    <path d="M512 310 C478 352 424 392 360 410 C430 420 488 384 512 340 Z"/>
+    <path d="M512 310 C546 352 600 392 664 410 C594 420 536 384 512 340 Z"/>
+    <path d="M490 318 C484 262 494 206 538 164 C558 172 566 186 560 198 C530 230 520 274 534 318 Z"/>
+  </g>
+</svg>
