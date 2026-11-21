@@ -1,6 +1,6 @@
 [package]
 name = "pomodairo"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pomodoro timer and task tracker"
 authors = ["Pomodairo contributors"]
 edition = "2024"
