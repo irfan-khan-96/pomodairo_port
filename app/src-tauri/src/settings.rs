@@ -52,6 +52,9 @@ pub struct GeneralSettings {
     /// Start Pomodairo (hidden in the tray) when the user signs in.
     #[serde(default)]
     pub launch_at_login: bool,
+    /// Check GitHub for a newer version now and then.
+    #[serde(default = "default_true")]
+    pub check_updates: bool,
 }
 
 fn default_true() -> bool {
@@ -87,6 +90,7 @@ impl Default for Settings {
                 notifications: true,
                 keep_in_tray: false,
                 launch_at_login: false,
+                check_updates: true,
             },
         }
     }
@@ -107,6 +111,7 @@ mod keys {
     pub const NOTIFICATIONS: &str = "general.notifications";
     pub const KEEP_IN_TRAY: &str = "window.keepInTray";
     pub const LAUNCH_AT_LOGIN: &str = "general.launchAtLogin";
+    pub const CHECK_UPDATES: &str = "general.checkUpdates";
 }
 
 /// Allowed ranges, as in the original's sliders.
@@ -173,6 +178,9 @@ impl Settings {
                 launch_at_login: cfg
                     .get_parsed(keys::LAUNCH_AT_LOGIN)
                     .unwrap_or(d.general.launch_at_login),
+                check_updates: cfg
+                    .get_parsed(keys::CHECK_UPDATES)
+                    .unwrap_or(d.general.check_updates),
             },
         }
     }
@@ -204,6 +212,7 @@ impl Settings {
                 keys::LAUNCH_AT_LOGIN,
                 self.general.launch_at_login.to_string(),
             ),
+            (keys::CHECK_UPDATES, self.general.check_updates.to_string()),
         ])
     }
 

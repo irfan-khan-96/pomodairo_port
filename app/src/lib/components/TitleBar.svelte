@@ -5,6 +5,7 @@
   import { openSettings } from "$lib/settings.svelte";
   import { changes, sync } from "$lib/sync.svelte";
   import { openStats } from "$lib/stats";
+  import { updates } from "$lib/update.svelte";
   import { view } from "$lib/view.svelte";
   import { closeWindow, minimizeWindow } from "$lib/window";
 
@@ -28,6 +29,7 @@
           ],
         },
         { text: "Statistics...", action: openStats },
+        { text: "Check for updates...", action: updates.checkNow },
         { item: "Separator" },
         { text: "Always on top", checked: p.always_on_top, action: () => view.setAlwaysOnTop(!p.always_on_top) },
         {
@@ -47,6 +49,16 @@
   <!-- As in the original, the menu is unavailable in mini view. -->
   <button class="menu" title="Menu" disabled={compact} onclick={openMenu}>Menu</button>
   <div class="spacer" data-tauri-drag-region></div>
+  {#if updates.status?.available && !compact}
+    <button
+      class="update"
+      title={`Pomodairo ${updates.status.available.version} is available`}
+      disabled={updates.status.installing}
+      onclick={updates.install}
+    >
+      {updates.status.installing ? "Updating…" : "Update"}
+    </button>
+  {/if}
   {#if sync.status && sync.status.peers.length && !compact}
     {@const waiting = sync.status.peers.filter((p) => p.pending > 0)}
     <!-- Hand-off indicator: is everything on the other devices yet? -->
@@ -101,6 +113,13 @@
     padding: 0 6px;
     font-size: 11px;
     color: #7ccf8a;
+  }
+
+  .update {
+    height: 18px;
+    padding: 0 8px;
+    font-size: 11px;
+    color: #6cb6ff;
   }
 
   .sync.pending {

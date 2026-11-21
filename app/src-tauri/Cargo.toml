@@ -1,8 +1,10 @@
 [package]
 name = "pomodairo"
-version = "0.2.0"
+version = "0.2.1"
 description = "Pomodoro timer and task tracker"
 authors = ["Pomodairo contributors"]
+license = "MIT"
+repository = "https://github.com/irfan-khan-96/pomodairo_port"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -47,6 +49,7 @@ strip = true
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
 
 [target."cfg(windows)".dependencies]
 keyring = { version = "3", default-features = false, features = ["windows-native"] }

@@ -151,6 +151,10 @@
         <input type="checkbox" bind:checked={draft.general.launch_at_login} />
         Start Pomodairo when I sign in (in the tray)
       </label>
+      <label class="check">
+        <input type="checkbox" bind:checked={draft.general.check_updates} />
+        Check for updates automatically
+      </label>
       <label class="field">
         <span>URL to open (e.g. your bug tracker)</span>
         <input type="url" placeholder="https://tracker.example.com/issue/" bind:value={draft.general.url_to_open} />

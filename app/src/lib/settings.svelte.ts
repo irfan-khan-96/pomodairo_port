@@ -22,6 +22,7 @@ export interface Settings {
     notifications: boolean;
     keep_in_tray: boolean;
     launch_at_login: boolean;
+    check_updates: boolean;
   };
 }
 
@@ -43,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
     notifications: true,
     keep_in_tray: false,
     launch_at_login: false,
+    check_updates: true,
   },
 };
 

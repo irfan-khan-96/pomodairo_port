@@ -3,7 +3,10 @@
 # - Every push and pull request: run the tests, build the installers, and attach
 #   them to the run as downloadable artifacts.
 # - Pushing a tag like `v0.2.0`: additionally creates a *draft* GitHub release with
-#   the installers attached, to review and publish by hand.
+#   the installers attached, to review and publish by hand. Tag builds also make
+#   signed update packages and `latest.json`, which installed copies check for
+#   updates once the release is published. Signing needs the repository secrets
+#   TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
 #
 # Installers are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper
 # will warn on first launch.
@@ -87,14 +90,19 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: app
-          args: ${{ matrix.args }}
+          # Tag builds also produce signed update packages (see tauri.release.conf.json).
+          args: ${{ matrix.args }}${{ startsWith(github.ref, 'refs/tags/v') && ' --config src-tauri/tauri.release.conf.json' || '' }}
           # Only tag pushes create a (draft) release; other runs just build.
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: Pomodairo ${{ github.ref_name }}
           releaseBody: See the assets below to download Pomodairo for your platform.
           releaseDraft: true
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
 
       - name: Upload installers
         uses: actions/upload-artifact@v4

@@ -172,7 +172,7 @@ pomodairo_new/
 7. **OS integration.** Tray icon with countdown tooltip, native notifications, single-instance lock.
 8. **Packaging.** `.msi`/`.exe` on Windows, `.dmg` on macOS, `.deb` on Debian; GitHub Actions build matrix.
 
-Deferred to the release phase: auto-updater (`tauri-plugin-updater` with GitHub Releases), code signing (Windows certificate, Apple Developer ID), autostart, global hotkeys, data export.
+Done since: autostart (0.2.0) and the auto-updater (0.2.1: `tauri-plugin-updater` with signed `latest.json` on GitHub Releases; Windows and macOS only, since the updater can't update a `.deb`). Still deferred: code signing (Windows certificate, Apple Developer ID), global hotkeys, data export.
 
 ## 8. Platform notes
 

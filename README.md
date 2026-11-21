@@ -13,6 +13,7 @@ statistics, for Windows, macOS and Linux (Debian/Ubuntu), built with
 - Tray icon with a live progress ring and countdown, desktop notifications, single instance
 - Sync between your own computers over your home network: no cloud, no account; pair once by comparing a 6-digit code, and a ✓ tells you when it's safe to switch devices
 - Data in a local SQLite database whose folder you can move
+- Automatic updates on Windows and macOS (signed; asks before installing)
 
 ## Development
 
@@ -70,11 +71,28 @@ From `app/`, `npm run tauri build` builds the installers for the current OS into
 GitHub Actions (`.github/workflows/build.yml`) builds all three on every push and pull
 request and attaches the installers to the run. To make a release, bump `version` in
 `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml` and `app/package.json`, then
-push a tag such as `v0.2.0`; the workflow creates a draft GitHub release with the
+push a tag such as `v0.2.1`; the workflow creates a draft GitHub release with the
 installers attached.
 
 The installers are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper
 will warn on first launch.
+
+### Updates
+
+Installed copies check `latest.json` on the repository's latest published GitHub
+release (shortly after start, then every 6 hours; can be turned off in Settings →
+General) and offer to install a newer version. Tag builds produce the signed update
+packages and `latest.json`; this needs two repository secrets:
+
+| Secret | Value |
+|---|---|
+| `TAURI_SIGNING_PRIVATE_KEY` | Contents of the update signing key (kept outside the repo) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Its password (empty if none) |
+
+The matching public key is in `app/src-tauri/tauri.conf.json`; updates signed with any
+other key are refused, so keep the private key backed up. Releases must be public for
+the download to work, and a release only becomes "latest" once it is published (not
+a draft). The `.deb` has no automatic updates: install the new `.deb` by hand.
 
 ## Project layout
 
@@ -86,6 +104,10 @@ app/
   scripts/             Icon and sound generators
 PLAN.md                Design decisions and milestones
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 ## Credits
 

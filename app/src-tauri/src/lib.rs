@@ -16,6 +16,7 @@ mod timer;
 mod timer_service;
 mod tray;
 mod tray_icon;
+mod updater_service;
 mod window_service;
 
 use tauri::Manager;
@@ -48,6 +49,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let db_path = db_location::resolve(app.handle())?;
             app.manage(TaskService::open(&db_path)?);
@@ -80,6 +82,7 @@ pub fn run() {
                 eprintln!("tray: unavailable: {e}");
             }
             timer_service::spawn_tick_loop(app.handle().clone());
+            updater_service::init(app.handle());
             Ok(())
         })
         .on_window_event(window_service::on_window_event)
@@ -121,6 +124,9 @@ pub fn run() {
             sync_service::sync_confirm_pairing,
             sync_service::sync_unpair,
             sync_service::sync_now,
+            updater_service::update_status,
+            updater_service::update_check,
+            updater_service::update_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

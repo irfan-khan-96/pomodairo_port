@@ -10,6 +10,7 @@
   import { formatClock, timer } from "$lib/timer.svelte";
   import { view } from "$lib/view.svelte";
   import { sync } from "$lib/sync.svelte";
+  import { updates } from "$lib/update.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { settings, ticketNumber } from "$lib/settings.svelte";
 
@@ -20,6 +21,7 @@
       view.connect(),
       settings.connect(),
       sync.connect(),
+      updates.connect(),
     ]);
     return () => void unlisten.then((fns) => fns.forEach((fn) => fn()));
   });
