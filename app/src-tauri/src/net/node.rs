@@ -46,7 +46,8 @@ pub trait SyncStore: Send + Sync + 'static {
     fn peer_by_fingerprint(&self, fingerprint: &str) -> Result<Option<Peer>>;
     fn peer_by_device(&self, device: &str) -> Result<Option<Peer>>;
     fn save_peer(&self, device: &str, name: &str, fingerprint: &str) -> Result<()>;
-    fn mark_synced(&self, device: &str, addr: Option<&str>) -> Result<()>;
+    /// A sync completed; the peer confirmed having our changes up to `acked_seq`.
+    fn mark_synced(&self, device: &str, addr: Option<&str>, acked_seq: i64) -> Result<()>;
 }
 
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
@@ -237,8 +238,8 @@ impl<S: SyncStore> Node<S> {
                     ));
                 };
                 write_msg(&mut tls, &self.hello(Mode::Sync)).await?;
-                exchange(&mut tls, self.store.as_ref()).await?;
-                self.store.mark_synced(&peer.device, None)?;
+                let done = exchange(&mut tls, self.store.as_ref(), self.device_id()).await?;
+                self.store.mark_synced(&peer.device, None, done.acked)?;
                 Ok(())
             }
             Mode::Pair => {
@@ -273,8 +274,8 @@ impl<S: SyncStore> Node<S> {
                 let name = clean_name(&name);
                 self.confirm_both(&mut tls, code, name.clone()).await?;
                 self.store.save_peer(&device, &name, &fp)?;
-                exchange(&mut tls, self.store.as_ref()).await?;
-                self.store.mark_synced(&device, None)?;
+                let done = exchange(&mut tls, self.store.as_ref(), self.device_id()).await?;
+                self.store.mark_synced(&device, None, done.acked)?;
                 Ok(())
             }
         }
@@ -341,13 +342,13 @@ impl<S: SyncStore> Node<S> {
             Msg::Reject { reason } => return Err(Error::Invalid(reason)),
             _ => return Err(Error::Invalid("unexpected answer".into())),
         }
-        let (sent, received) = exchange(&mut tls, self.store.as_ref()).await?;
+        let done = exchange(&mut tls, self.store.as_ref(), self.device_id()).await?;
         self.store
-            .mark_synced(&peer.device, Some(&addr.to_string()))?;
+            .mark_synced(&peer.device, Some(&addr.to_string()), done.acked)?;
         Ok(Outcome {
             device: peer.device,
-            sent,
-            received,
+            sent: done.sent,
+            received: done.received,
         })
     }
 
@@ -396,43 +397,67 @@ impl<S: SyncStore> Node<S> {
         let code = pairing_code(&self.identity.fingerprint, &fp, &ours, &theirs);
         self.confirm_both(&mut tls, code, name.clone()).await?;
         self.store.save_peer(&device, &name, &fp)?;
-        exchange(&mut tls, self.store.as_ref()).await?;
-        self.store.mark_synced(&device, Some(&addr.to_string()))?;
+        let done = exchange(&mut tls, self.store.as_ref(), self.device_id()).await?;
+        self.store
+            .mark_synced(&device, Some(&addr.to_string()), done.acked)?;
         self.store
             .peer_by_device(&device)?
             .ok_or_else(|| Error::Invalid("pairing was not saved".into()))
     }
 }
 
-/// Swap version vectors, then send and receive missing events concurrently.
-/// Returns (events sent, new events received).
-async fn exchange<IO, S>(io: &mut IO, store: &S) -> Result<(usize, usize)>
+struct Exchanged {
+    sent: usize,
+    received: usize,
+    /// Our own sequence number the peer has confirmed applying.
+    acked: i64,
+}
+
+/// Swap version vectors, send and receive missing events concurrently, apply
+/// them, then confirm to each other that they were applied.
+async fn exchange<IO, S>(io: &mut IO, store: &S, me: &str) -> Result<Exchanged>
 where
     IO: AsyncRead + AsyncWrite + Unpin,
     S: SyncStore + ?Sized,
 {
+    let ours_vv = store.version_vector()?;
     write_msg(
         io,
         &Msg::Vector {
-            vv: store.version_vector()?,
+            vv: ours_vv.clone(),
         },
     )
     .await?;
     let Msg::Vector { vv: theirs } = read_msg(io, STEP_TIMEOUT).await? else {
         return Err(Error::Invalid("expected version vector".into()));
     };
-    let ours = store.events_missing(&theirs)?;
-    let sent = ours.len();
-    let outgoing = Msg::Events { events: ours };
-    let (mut r, mut w) = tokio::io::split(io);
-    let (sent_res, received) = tokio::join!(
-        write_msg(&mut w, &outgoing),
-        read_msg(&mut r, Duration::from_secs(120)),
-    );
-    sent_res?;
-    let Msg::Events { events } = received? else {
-        return Err(Error::Invalid("expected events".into()));
+    let outgoing = Msg::Events {
+        events: store.events_missing(&theirs)?,
     };
-    let new = store.ingest(&events)?;
-    Ok((sent, new))
+    let sent = match &outgoing {
+        Msg::Events { events } => events.len(),
+        _ => 0,
+    };
+    let received = {
+        let (mut r, mut w) = tokio::io::split(&mut *io);
+        let (sent_res, received) = tokio::join!(
+            write_msg(&mut w, &outgoing),
+            read_msg(&mut r, Duration::from_secs(120)),
+        );
+        sent_res?;
+        let Msg::Events { events } = received? else {
+            return Err(Error::Invalid("expected events".into()));
+        };
+        store.ingest(&events)?
+    };
+    // Both sides applied what they received: now it counts as delivered.
+    write_msg(io, &Msg::Applied).await?;
+    let Msg::Applied = read_msg(io, STEP_TIMEOUT).await? else {
+        return Err(Error::Invalid("peer did not confirm the sync".into()));
+    };
+    Ok(Exchanged {
+        sent,
+        received,
+        acked: ours_vv.get(me).copied().unwrap_or(0),
+    })
 }

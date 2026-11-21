@@ -68,10 +68,10 @@ impl SyncStore for AppStore {
         self.tasks()
             .read(|c| peers::save(c, device, name, fp, chrono::Utc::now()))
     }
-    fn mark_synced(&self, device: &str, addr: Option<&str>) -> Result<()> {
+    fn mark_synced(&self, device: &str, addr: Option<&str>, acked: i64) -> Result<()> {
         self.tasks()
-            .read(|c| peers::mark_synced(c, device, addr, chrono::Utc::now()))?;
-        let _ = self.app.emit(STATUS_EVENT, ());
+            .read(|c| peers::mark_synced(c, device, addr, acked, chrono::Utc::now()))?;
+        publish(&self.app);
         Ok(())
     }
 }
@@ -204,7 +204,7 @@ impl SyncService {
                 }
             }
             wake.notify_one();
-            let _ = app.emit(STATUS_EVENT, ());
+            publish(&app);
         }) {
             Ok(d) => Some(d),
             Err(e) => {
@@ -274,7 +274,7 @@ impl SyncService {
             }
         }
         self.set_error(error);
-        let _ = self.app.emit(STATUS_EVENT, ());
+        publish(&self.app);
     }
 
     fn status(&self) -> Result<SyncStatus> {
@@ -287,8 +287,14 @@ impl SyncService {
                 name: p.name.clone(),
                 last_sync: p.last_sync.clone(),
                 online: seen.contains_key(&p.device),
+                pending: self
+                    .app
+                    .state::<TaskService>()
+                    .read(|c| peers::pending(c, self.node.device_id(), p))
+                    .unwrap_or(0),
             })
             .collect();
+        let pending_total = paired.iter().map(|p| p.pending).sum();
         let nearby = seen
             .into_iter()
             .filter(|(d, _)| !peers.iter().any(|p| &p.device == d))
@@ -298,6 +304,7 @@ impl SyncService {
             device_id: self.node.device_id().to_string(),
             name: self.node.name().to_string(),
             pairing_open: self.node.pairing_open(),
+            pending_total,
             peers: paired,
             nearby,
             last_error: self.last_error.lock().unwrap().clone(),
@@ -310,6 +317,7 @@ pub fn init(app: &AppHandle) -> Result<()> {
     let svc = SyncService::new(app)?;
     let start = svc.has_peers();
     app.manage(svc);
+    publish(app);
     if start {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
@@ -321,11 +329,45 @@ pub fn init(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
-/// A local change happened: sync soon.
+/// A local change happened: show it as not yet handed off, and sync soon.
 pub fn changed(app: &AppHandle) {
     if let Some(svc) = app.try_state::<SyncService>() {
         svc.wake.notify_one();
+        publish(app);
     }
+}
+
+/// Send the current sync status to the UI and the tray.
+fn publish(app: &AppHandle) {
+    let Some(svc) = app.try_state::<SyncService>() else {
+        return;
+    };
+    let Ok(status) = svc.status() else { return };
+    crate::tray::set_sync(app, tray_note(&status));
+    let _ = app.emit(STATUS_EVENT, &status);
+}
+
+/// The tray tooltip line: nothing until a device is paired.
+fn tray_note(status: &SyncStatus) -> Option<(String, bool)> {
+    if status.peers.is_empty() {
+        return None;
+    }
+    let waiting: Vec<&str> = status
+        .peers
+        .iter()
+        .filter(|p| p.pending > 0)
+        .map(|p| p.name.as_str())
+        .collect();
+    Some(if waiting.is_empty() {
+        ("All changes synced".to_string(), false)
+    } else {
+        let n = status.pending_total;
+        let s = if n == 1 { "" } else { "s" };
+        (
+            format!("{n} change{s} not yet on {}", waiting.join(", ")),
+            true,
+        )
+    })
 }
 
 #[derive(Serialize)]
@@ -334,6 +376,8 @@ pub struct PeerStatus {
     name: String,
     last_sync: Option<String>,
     online: bool,
+    /// This device's changes the peer hasn't confirmed yet.
+    pending: i64,
 }
 
 #[derive(Serialize)]
@@ -347,6 +391,8 @@ pub struct SyncStatus {
     device_id: String,
     name: String,
     pairing_open: bool,
+    /// Changes made here that some paired device doesn't have yet.
+    pending_total: i64,
     peers: Vec<PeerStatus>,
     /// Unpaired devices nearby that are waiting to pair.
     nearby: Vec<Nearby>,
@@ -381,7 +427,7 @@ pub async fn sync_open_pairing(svc: State<'_, SyncService>) -> Result<SyncStatus
         {
             let _ = d.advertise(None);
         }
-        let _ = app.emit(STATUS_EVENT, ());
+        publish(&app);
     });
     svc.status()
 }
@@ -441,6 +487,7 @@ pub fn sync_unpair(svc: State<'_, SyncService>, device: String) -> Result<SyncSt
     svc.app
         .state::<TaskService>()
         .read(|c| peers::remove(c, &device))?;
+    publish(&svc.app);
     svc.status()
 }
 

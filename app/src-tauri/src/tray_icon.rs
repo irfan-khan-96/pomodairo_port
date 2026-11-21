@@ -17,6 +17,9 @@ const YELLOW: [u8; 3] = [0xf2, 0xc4, 0x0f]; // work (a deeper gold so it shows o
 const GREEN: [u8; 3] = [0x3f, 0xbf, 0x5f]; // break
 const RED: [u8; 3] = [0xe8, 0x48, 0x3a]; // time's up
 const LEAF: [u8; 3] = [0x4c, 0xaf, 0x50];
+/// "Some changes aren't on a paired device yet" dot, with a dark rim so it reads on any taskbar.
+const PENDING: [u8; 3] = [0xf0, 0xa0, 0x20];
+const PENDING_RIM: [u8; 3] = [0x26, 0x26, 0x26];
 /// Unfilled part of the ring: mid gray, half transparent, visible on light and dark taskbars.
 const TRACK: [u8; 4] = [0x8c, 0x8c, 0x8c, 0x70];
 
@@ -26,6 +29,8 @@ pub struct IconKey {
     color: [u8; 3],
     /// Filled steps out of `STEPS`.
     filled: u32,
+    /// Show the "not yet synced" dot.
+    pending: bool,
 }
 
 impl IconKey {
@@ -42,29 +47,43 @@ impl IconKey {
             Phase::Idle => Self {
                 color: YELLOW,
                 filled: STEPS,
+                pending: false,
             },
             Phase::Pomodoro => Self {
                 color: YELLOW,
                 filled: fraction(s),
+                pending: false,
             },
             Phase::Break => Self {
                 color: GREEN,
                 filled: fraction(s),
+                pending: false,
             },
             Phase::TimeOut | Phase::BreakOver => Self {
                 color: RED,
                 filled: STEPS,
+                pending: false,
             },
         }
     }
 
     /// The icon as straight (non-premultiplied) RGBA, `SIZE` × `SIZE`.
+    pub fn with_pending(mut self, pending: bool) -> Self {
+        self.pending = pending;
+        self
+    }
+
     pub fn render(&self) -> Vec<u8> {
-        render(SIZE, self.filled as f32 / STEPS as f32, self.color)
+        render(
+            SIZE,
+            self.filled as f32 / STEPS as f32,
+            self.color,
+            self.pending,
+        )
     }
 }
 
-fn render(size: u32, remaining: f32, color: [u8; 3]) -> Vec<u8> {
+fn render(size: u32, remaining: f32, color: [u8; 3], pending: bool) -> Vec<u8> {
     let n = size as f32;
     let (cx, cy) = (n / 2.0, n * 0.55);
     let (outer, inner) = (n * 0.43, n * 0.27);
@@ -89,7 +108,13 @@ fn render(size: u32, remaining: f32, color: [u8; 3]) -> Vec<u8> {
                     });
                     let (dx, dy) = (x - cx, y - cy);
                     let r = (dx * dx + dy * dy).sqrt();
-                    let rgba = if in_leaf {
+                    let (px_, py_) = (x - n * 0.80, y - n * 0.80);
+                    let dot = (px_ * px_ + py_ * py_).sqrt();
+                    let rgba = if pending && dot <= n * 0.15 {
+                        Some([PENDING[0], PENDING[1], PENDING[2], 255])
+                    } else if pending && dot <= n * 0.21 {
+                        Some([PENDING_RIM[0], PENDING_RIM[1], PENDING_RIM[2], 255])
+                    } else if in_leaf {
                         Some([LEAF[0], LEAF[1], LEAF[2], 255])
                     } else if (inner..=outer).contains(&r) {
                         // Clockwise angle from twelve o'clock.
@@ -151,23 +176,36 @@ mod tests {
 
     #[test]
     fn full_ring_and_partial_ring() {
-        let full = render(SIZE, 1.0, YELLOW);
+        let full = render(SIZE, 1.0, YELLOW, false);
         assert_eq!(full.len(), (SIZE * SIZE * 4) as usize);
         assert_eq!(&pixel(&full, EAST.0, EAST.1)[..3], &YELLOW);
         assert_eq!(&pixel(&full, WEST.0, WEST.1)[..3], &YELLOW);
 
         // 40% left: three o'clock (25%) is still lit, nine o'clock (75%) is track.
-        let partial = render(SIZE, 0.4, YELLOW);
+        let partial = render(SIZE, 0.4, YELLOW, false);
         assert_eq!(&pixel(&partial, EAST.0, EAST.1)[..3], &YELLOW);
         assert_eq!(pixel(&partial, WEST.0, WEST.1), TRACK);
     }
 
     #[test]
     fn centre_and_corners_are_transparent_and_leaf_is_green() {
-        let img = render(SIZE, 1.0, RED);
+        let img = render(SIZE, 1.0, RED, false);
         assert_eq!(pixel(&img, 16, 17)[3], 0, "hole in the ring");
         assert_eq!(pixel(&img, 0, 31)[3], 0, "corner");
         assert_eq!(pixel(&img, 12, 4), [LEAF[0], LEAF[1], LEAF[2], 255]);
+    }
+
+    #[test]
+    fn pending_dot_sits_bottom_right_only_when_asked() {
+        let with = render(SIZE, 1.0, YELLOW, true);
+        let without = render(SIZE, 1.0, YELLOW, false);
+        assert_eq!(&pixel(&with, 26, 26)[..3], &PENDING);
+        assert_ne!(&pixel(&without, 26, 26)[..3], &PENDING);
+        assert_eq!(
+            pixel(&with, 16, 17),
+            pixel(&without, 16, 17),
+            "rest unchanged"
+        );
     }
 
     #[test]
@@ -177,7 +215,8 @@ mod tests {
             a,
             IconKey {
                 color: YELLOW,
-                filled: 60
+                filled: 60,
+                pending: false
             }
         );
         // 1499 s and 1476 s left round up to the same step, so no redraw in between.
@@ -197,7 +236,8 @@ mod tests {
             IconKey::for_snapshot(&snap(Phase::TimeOut, 0, 1500)),
             IconKey {
                 color: RED,
-                filled: 60
+                filled: 60,
+                pending: false
             }
         );
         assert_eq!(

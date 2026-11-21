@@ -16,9 +16,11 @@ pub struct Peer {
     pub paired_at: String,
     pub last_sync: Option<String>,
     pub last_addr: Option<String>,
+    /// This device's own changes up to this sequence number are on the peer.
+    pub acked_seq: i64,
 }
 
-const COLUMNS: &str = "device, name, fingerprint, paired_at, last_sync, last_addr";
+const COLUMNS: &str = "device, name, fingerprint, paired_at, last_sync, last_addr, acked_seq";
 
 fn from_row(r: &Row) -> rusqlite::Result<Peer> {
     Ok(Peer {
@@ -28,6 +30,7 @@ fn from_row(r: &Row) -> rusqlite::Result<Peer> {
         paired_at: r.get(3)?,
         last_sync: r.get(4)?,
         last_addr: r.get(5)?,
+        acked_seq: r.get(6)?,
     })
 }
 
@@ -76,23 +79,36 @@ pub fn save(
     conn.execute(
         "INSERT INTO sync_peer (device, name, fingerprint, paired_at) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT (device) DO UPDATE SET name = excluded.name, fingerprint = excluded.fingerprint,
-           paired_at = excluded.paired_at, last_sync = NULL",
+           paired_at = excluded.paired_at, last_sync = NULL, acked_seq = 0",
         params![device, name, fingerprint, timestamp(now)],
     )?;
     Ok(())
 }
 
+/// Record a completed sync; `acked_seq` is this device's own sequence number
+/// that the peer has now confirmed applying.
 pub fn mark_synced(
     conn: &Connection,
     device: &str,
     addr: Option<&str>,
+    acked_seq: i64,
     now: DateTime<Utc>,
 ) -> Result<()> {
     conn.execute(
-        "UPDATE sync_peer SET last_sync = ?2, last_addr = COALESCE(?3, last_addr) WHERE device = ?1",
-        params![device, timestamp(now), addr],
+        "UPDATE sync_peer SET last_sync = ?2, last_addr = COALESCE(?3, last_addr),
+           acked_seq = MAX(acked_seq, ?4) WHERE device = ?1",
+        params![device, timestamp(now), addr, acked_seq],
     )?;
     Ok(())
+}
+
+/// How many of this device's own changes `peer` hasn't confirmed yet.
+pub fn pending(conn: &Connection, me: &str, peer: &Peer) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM sync_event WHERE device = ?1 AND seq > ?2",
+        params![me, peer.acked_seq],
+        |r| r.get(0),
+    )?)
 }
 
 pub fn remove(conn: &Connection, device: &str) -> Result<bool> {

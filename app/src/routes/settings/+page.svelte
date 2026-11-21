@@ -12,11 +12,14 @@
     type SettingsTab,
   } from "$lib/settings.svelte";
   import { view } from "$lib/view.svelte";
+  import { sync } from "$lib/sync.svelte";
+  import DevicesTab from "$lib/components/DevicesTab.svelte";
 
   const LABELS: Record<SettingsTab, string> = {
     general: "General",
     timing: "Timing",
     sounds: "Sounds",
+    devices: "Devices",
     advanced: "Advanced",
   };
 
@@ -32,7 +35,7 @@
   let saving = $state(false);
 
   onMount(() => {
-    const cleanups: Promise<() => void>[] = [settings.connect(), view.connect()];
+    const cleanups: Promise<() => void>[] = [settings.connect(), view.connect(), sync.connect()];
     (async () => {
       await Promise.all(cleanups);
       draft = structuredClone($state.snapshot(settings.current));
@@ -113,7 +116,7 @@
 
   function onkeydown(e: KeyboardEvent) {
     if (e.key === "Escape") close();
-    else if (e.key === "Enter" && !(e.target instanceof HTMLButtonElement)) save();
+    else if (e.key === "Enter" && tab !== "devices" && !(e.target instanceof HTMLButtonElement)) save();
   }
 </script>
 
@@ -139,6 +142,14 @@
       <label class="check">
         <input type="checkbox" bind:checked={draft.general.notifications} />
         Show a notification when a pomodoro or break ends
+      </label>
+      <label class="check">
+        <input type="checkbox" bind:checked={draft.general.keep_in_tray} />
+        Keep running in the tray when the window is closed
+      </label>
+      <label class="check">
+        <input type="checkbox" bind:checked={draft.general.launch_at_login} />
+        Start Pomodairo when I sign in (in the tray)
       </label>
       <label class="field">
         <span>URL to open (e.g. your bug tracker)</span>
@@ -168,6 +179,8 @@
         </div>
       </div>
       {@render soundFile("ticking", "Ticking sound")}
+    {:else if tab === "devices"}
+      <DevicesTab keepInTray={settings.current.general.keep_in_tray} />
     {:else}
       <div class="field">
         <span>Database location</span>

@@ -3,6 +3,7 @@
   import { LogicalPosition } from "@tauri-apps/api/dpi";
   import { Menu } from "@tauri-apps/api/menu";
   import { openSettings } from "$lib/settings.svelte";
+  import { changes, sync } from "$lib/sync.svelte";
   import { openStats } from "$lib/stats";
   import { view } from "$lib/view.svelte";
   import { closeWindow, minimizeWindow } from "$lib/window";
@@ -22,6 +23,7 @@
             { text: "General...", action: () => openSettings("general") },
             { text: "Timing...", action: () => openSettings("timing") },
             { text: "Sounds...", action: () => openSettings("sounds") },
+            { text: "Devices...", action: () => openSettings("devices") },
             { text: "Advanced...", action: () => openSettings("advanced") },
           ],
         },
@@ -45,6 +47,20 @@
   <!-- As in the original, the menu is unavailable in mini view. -->
   <button class="menu" title="Menu" disabled={compact} onclick={openMenu}>Menu</button>
   <div class="spacer" data-tauri-drag-region></div>
+  {#if sync.status && sync.status.peers.length && !compact}
+    {@const waiting = sync.status.peers.filter((p) => p.pending > 0)}
+    <!-- Hand-off indicator: is everything on the other devices yet? -->
+    <button
+      class="sync"
+      class:pending={waiting.length > 0}
+      title={waiting.length
+        ? `${changes(sync.status.pending_total)} not yet on ${waiting.map((p) => p.name).join(", ")}`
+        : `Up to date on ${sync.status.peers.map((p) => p.name).join(", ")}`}
+      onclick={() => openSettings("devices")}
+    >
+      {waiting.length ? `↑${sync.status.pending_total}` : "✓"}
+    </button>
+  {/if}
   <button class="view" title="Toggle mini view (M)" onclick={view.toggleMini}>view</button>
   <button class="icon" title="Minimise" aria-label="Minimise" onclick={minimizeWindow}>
     <svg viewBox="0 0 10 10" width="10" height="10"><path d="M1 8h8" stroke="currentColor" stroke-width="1.5" /></svg>
@@ -77,6 +93,18 @@
     border-radius: 0 0 4px 0;
     border-top: none;
     border-left: none;
+  }
+
+  .sync {
+    height: 18px;
+    min-width: 22px;
+    padding: 0 6px;
+    font-size: 11px;
+    color: #7ccf8a;
+  }
+
+  .sync.pending {
+    color: #f0a020;
   }
 
   .view {

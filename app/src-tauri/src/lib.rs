@@ -39,6 +39,12 @@ pub fn run() {
         }));
     }
     builder
+        // Launched at login with --hidden: start in the tray.
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg("--hidden")
+                .build(),
+        )
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -49,12 +55,21 @@ pub fn run() {
             app.manage(TimerService::new(&settings.current()));
             app.manage(settings);
             app.manage(WindowService::new(ConfigStore::open(&db_path)?));
-            if let Err(e) = window_service::restore(app.handle()) {
+            let hidden = std::env::args().any(|a| a == "--hidden");
+            if let Err(e) = window_service::restore(app.handle(), !hidden) {
                 // Never leave the (initially hidden) window invisible.
                 eprintln!("window: failed to restore preferences: {e}");
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.show();
                 }
+            }
+            let launch = app
+                .state::<SettingsService>()
+                .current()
+                .general
+                .launch_at_login;
+            if let Err(e) = settings_service::apply_launch_at_login(app.handle(), launch) {
+                eprintln!("settings: {e}");
             }
             if let Err(e) = sync_service::init(app.handle()) {
                 // Sync is optional: the app works without it.

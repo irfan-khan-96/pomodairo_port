@@ -11,6 +11,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/001_init.sql"),
     include_str!("../migrations/002_sync.sql"),
     include_str!("../migrations/003_peers.sql"),
+    include_str!("../migrations/004_handoff.sql"),
 ];
 
 pub fn open(path: &Path) -> crate::error::Result<Connection> {

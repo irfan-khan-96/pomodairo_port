@@ -221,13 +221,10 @@ fn notify(app: &AppHandle, svc: &TimerService, title: &str, body: &str) {
 /// Bring the window forward and flash the taskbar entry, as the original did on time-out.
 fn demand_attention(app: &AppHandle, kind: UserAttentionType) {
     crate::window_service::leave_mini(app);
-    let Some(window) = app.get_webview_window("main") else {
-        return;
-    };
-    let _ = window.unminimize();
-    let _ = window.show();
-    let _ = window.set_focus();
-    let _ = window.request_user_attention(Some(kind));
+    crate::window_service::reveal(app);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.request_user_attention(Some(kind));
+    }
 }
 
 /// Taskbar title, as in the original: `24' Write docs`, `42'' Write docs` in the

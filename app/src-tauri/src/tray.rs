@@ -18,6 +18,10 @@ pub struct TrayState {
     toggle: MenuItem<Wry>,
     /// The icon currently shown, so it is only redrawn when the ring changes.
     icon: Mutex<Option<IconKey>>,
+    /// Last timer state shown, to redraw when only the sync note changes.
+    last: Mutex<Option<(TimerSnapshot, Option<String>)>>,
+    /// Sync line for the tooltip, and whether changes are still waiting to reach a device.
+    sync: Mutex<Option<(String, bool)>>,
 }
 
 fn ring_image(key: IconKey) -> Image<'static> {
@@ -69,6 +73,8 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     app.manage(TrayState {
         toggle,
         icon: Mutex::new(Some(idle)),
+        last: Mutex::new(None),
+        sync: Mutex::new(None),
     });
     Ok(())
 }
@@ -78,16 +84,41 @@ pub fn update(app: &AppHandle, snapshot: &TimerSnapshot, task: Option<&str>) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    let _ = tray.set_tooltip(Some(tooltip(snapshot, task)));
+    let state = app.try_state::<TrayState>();
+    let sync = state.as_ref().and_then(|s| s.sync.lock().unwrap().clone());
+    let mut tip = tooltip(snapshot, task);
+    if let Some((note, _)) = &sync {
+        tip = format!("{tip}\n{note}").chars().take(127).collect();
+    }
+    let _ = tray.set_tooltip(Some(tip));
     // Shown beside the icon on macOS and Linux; not supported on Windows.
     let _ = tray.set_title(Some(countdown(snapshot).unwrap_or_default()));
-    if let Some(state) = app.try_state::<TrayState>() {
+    if let Some(state) = state {
+        *state.last.lock().unwrap() = Some((*snapshot, task.map(str::to_string)));
         let _ = state.toggle.set_text(toggle_label(snapshot.phase));
-        let key = IconKey::for_snapshot(snapshot);
+        let pending = sync.is_some_and(|(_, pending)| pending);
+        let key = IconKey::for_snapshot(snapshot).with_pending(pending);
         let changed = state.icon.lock().unwrap().replace(key) != Some(key);
         if changed {
             let _ = tray.set_icon(Some(ring_image(key)));
         }
+    }
+}
+
+/// Update the sync line (`None` when no devices are paired) and redraw.
+pub fn set_sync(app: &AppHandle, note: Option<(String, bool)>) {
+    let Some(state) = app.try_state::<TrayState>() else {
+        return;
+    };
+    let changed = {
+        let mut current = state.sync.lock().unwrap();
+        let changed = *current != note;
+        *current = note;
+        changed
+    };
+    let last = state.last.lock().unwrap().clone();
+    if changed && let Some((snapshot, task)) = last {
+        update(app, &snapshot, task.as_deref());
     }
 }
 
@@ -126,11 +157,7 @@ fn toggle_window(app: &AppHandle) {
 
 /// Show, restore and focus the main window.
 pub fn show_main(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    crate::window_service::reveal(app);
 }
 
 fn toggle_label(phase: Phase) -> &'static str {

@@ -9,11 +9,18 @@
   import { shortDescription, tasks, type Task } from "$lib/tasks.svelte";
   import { formatClock, timer } from "$lib/timer.svelte";
   import { view } from "$lib/view.svelte";
+  import { sync } from "$lib/sync.svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { settings, ticketNumber } from "$lib/settings.svelte";
 
   onMount(() => {
-    const unlisten = Promise.all([timer.connect(), tasks.connect(), view.connect(), settings.connect()]);
+    const unlisten = Promise.all([
+      timer.connect(),
+      tasks.connect(),
+      view.connect(),
+      settings.connect(),
+      sync.connect(),
+    ]);
     return () => void unlisten.then((fns) => fns.forEach((fn) => fn()));
   });
 

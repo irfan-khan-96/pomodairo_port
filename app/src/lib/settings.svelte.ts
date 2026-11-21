@@ -20,6 +20,8 @@ export interface Settings {
     update_taskbar: boolean;
     url_to_open: string;
     notifications: boolean;
+    keep_in_tray: boolean;
+    launch_at_login: boolean;
   };
 }
 
@@ -29,13 +31,19 @@ export interface DatabaseLocation {
   overridden: boolean;
 }
 
-export type SettingsTab = "general" | "timing" | "sounds" | "advanced";
-export const TABS: SettingsTab[] = ["general", "timing", "sounds", "advanced"];
+export type SettingsTab = "general" | "timing" | "sounds" | "devices" | "advanced";
+export const TABS: SettingsTab[] = ["general", "timing", "sounds", "devices", "advanced"];
 
 export const DEFAULT_SETTINGS: Settings = {
   timing: { pomodoro_minutes: 25, short_break_minutes: 5, long_break_minutes: 15, long_break_interval: 4 },
   sound: { enabled: true, volume: 100, fade_ticking: true, alarm_file: null, ticking_file: null },
-  general: { update_taskbar: true, url_to_open: "", notifications: true },
+  general: {
+    update_taskbar: true,
+    url_to_open: "",
+    notifications: true,
+    keep_in_tray: false,
+    launch_at_login: false,
+  },
 };
 
 /** Saved settings, kept current across windows. */

@@ -69,8 +69,8 @@ impl SyncStore for TestStore {
     fn save_peer(&self, device: &str, name: &str, fp: &str) -> Result<()> {
         peers::save(&self.0.lock().unwrap(), device, name, fp, Utc::now())
     }
-    fn mark_synced(&self, device: &str, addr: Option<&str>) -> Result<()> {
-        peers::mark_synced(&self.0.lock().unwrap(), device, addr, Utc::now())
+    fn mark_synced(&self, device: &str, addr: Option<&str>, acked: i64) -> Result<()> {
+        peers::mark_synced(&self.0.lock().unwrap(), device, addr, acked, Utc::now())
     }
 }
 
@@ -306,4 +306,40 @@ async fn three_devices_relay_changes_through_each_other() {
     a.node.sync_with(b.addr, &b.store.device()).await.unwrap();
     b.node.sync_with(c.addr, &c.store.device()).await.unwrap();
     assert_eq!(c.store.names(), ["Made on desktop"]);
+}
+
+/// Changes made on this device that its (only) peer hasn't confirmed applying yet.
+fn unconfirmed(store: &TestStore) -> i64 {
+    let c = store.0.lock().unwrap();
+    let me = engine::device_id(&c).unwrap();
+    let peer = peers::list(&c).unwrap().remove(0);
+    peers::pending(&c, &me, &peer).unwrap()
+}
+
+#[tokio::test]
+async fn changes_count_as_handed_off_only_once_the_peer_confirms() {
+    let (a, b) = paired("Desktop", "Laptop").await;
+    assert_eq!(unconfirmed(&a.store), 0, "pairing synced everything");
+    a.store.create("One");
+    a.store.create("Two");
+    assert_eq!(unconfirmed(&a.store), 2);
+    a.node.sync_with(b.addr, &b.store.device()).await.unwrap();
+    assert_eq!(unconfirmed(&a.store), 0, "desktop started the sync");
+
+    a.store.create("Three");
+    assert_eq!(unconfirmed(&a.store), 1);
+    b.node.sync_with(a.addr, &a.store.device()).await.unwrap();
+    // The desktop records the confirmation just after the laptop's call returns.
+    for _ in 0..50 {
+        if unconfirmed(&a.store) == 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        unconfirmed(&a.store),
+        0,
+        "laptop started the sync; desktop still learns it arrived"
+    );
+    assert_eq!(unconfirmed(&b.store), 0);
 }

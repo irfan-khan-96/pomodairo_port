@@ -46,6 +46,12 @@ pub struct GeneralSettings {
     /// Desktop notification when a pomodoro or break ends.
     #[serde(default = "default_true")]
     pub notifications: bool,
+    /// Closing the window keeps Pomodairo running in the tray (so devices stay in sync).
+    #[serde(default)]
+    pub keep_in_tray: bool,
+    /// Start Pomodairo (hidden in the tray) when the user signs in.
+    #[serde(default)]
+    pub launch_at_login: bool,
 }
 
 fn default_true() -> bool {
@@ -79,6 +85,8 @@ impl Default for Settings {
                 update_taskbar: true,
                 url_to_open: String::new(),
                 notifications: true,
+                keep_in_tray: false,
+                launch_at_login: false,
             },
         }
     }
@@ -97,6 +105,8 @@ mod keys {
     pub const UPDATE_TASKBAR: &str = "window.updateTaskbar";
     pub const URL_TO_OPEN: &str = "general.urlToOpen";
     pub const NOTIFICATIONS: &str = "general.notifications";
+    pub const KEEP_IN_TRAY: &str = "window.keepInTray";
+    pub const LAUNCH_AT_LOGIN: &str = "general.launchAtLogin";
 }
 
 /// Allowed ranges, as in the original's sliders.
@@ -157,6 +167,12 @@ impl Settings {
                 notifications: cfg
                     .get_parsed(keys::NOTIFICATIONS)
                     .unwrap_or(d.general.notifications),
+                keep_in_tray: cfg
+                    .get_parsed(keys::KEEP_IN_TRAY)
+                    .unwrap_or(d.general.keep_in_tray),
+                launch_at_login: cfg
+                    .get_parsed(keys::LAUNCH_AT_LOGIN)
+                    .unwrap_or(d.general.launch_at_login),
             },
         }
     }
@@ -183,6 +199,11 @@ impl Settings {
             ),
             (keys::URL_TO_OPEN, self.general.url_to_open.clone()),
             (keys::NOTIFICATIONS, self.general.notifications.to_string()),
+            (keys::KEEP_IN_TRAY, self.general.keep_in_tray.to_string()),
+            (
+                keys::LAUNCH_AT_LOGIN,
+                self.general.launch_at_login.to_string(),
+            ),
         ])
     }
 

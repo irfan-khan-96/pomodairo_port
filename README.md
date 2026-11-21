@@ -11,7 +11,8 @@ statistics, for Windows, macOS and Linux (Debian/Ubuntu), built with
 - Mini, short and full views; always-on-top; remembers window position and size
 - Statistics: finished tasks, interruptions, pomodoros per day and the weekly "reality factor"
 - Tray icon with a live progress ring and countdown, desktop notifications, single instance
-- Data in a local SQLite database whose folder you can move (e.g. into a synced folder)
+- Sync between your own computers over your home network: no cloud, no account; pair once by comparing a 6-digit code, and a ✓ tells you when it's safe to switch devices
+- Data in a local SQLite database whose folder you can move
 
 ## Development
 

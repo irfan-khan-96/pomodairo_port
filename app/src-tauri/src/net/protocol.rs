@@ -59,6 +59,9 @@ pub enum Msg {
     Events {
         events: Vec<Event>,
     },
+    /// Sent after applying the received events: the sync is only counted as
+    /// delivered once both sides have said so.
+    Applied,
 }
 
 pub fn net_err(what: &str, e: impl std::fmt::Display) -> Error {

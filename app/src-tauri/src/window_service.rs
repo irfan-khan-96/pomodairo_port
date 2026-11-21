@@ -211,6 +211,8 @@ pub fn position_visible(pos: (i32, i32), width: i32, monitors: &[(i32, i32, u32,
 pub struct WindowService {
     config: ConfigStore,
     prefs: Mutex<WindowPrefs>,
+    /// The saved size has been applied (it can only be once the window is visible).
+    sized: std::sync::atomic::AtomicBool,
 }
 
 impl WindowService {
@@ -219,6 +221,7 @@ impl WindowService {
         Self {
             config,
             prefs: Mutex::new(prefs),
+            sized: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -279,7 +282,8 @@ pub fn persist<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Apply saved preferences to the (still hidden) main window, then show it.
-pub fn restore<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+/// `visible: false` when started at login: the window stays in the tray until opened.
+pub fn restore<R: Runtime>(app: &AppHandle<R>, visible: bool) -> tauri::Result<()> {
     let Some(window) = app.get_webview_window(MAIN) else {
         return Ok(());
     };
@@ -308,12 +312,27 @@ pub fn restore<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         Some((x, y)) => window.set_position(PhysicalPosition::new(x, y))?,
         None => window.center()?,
     }
-    window.show()?;
-    // Resize only once visible: on Windows, resizing the hidden frameless window
-    // makes it about 30px too tall.
-    apply_size(&window, &prefs)?;
-    window.set_focus()?;
+    if visible {
+        reveal(app);
+    }
     Ok(())
+}
+
+/// Show, restore and focus the main window. The saved size is applied the first
+/// time: resizing the still-hidden frameless window on Windows makes it ~30px too tall.
+pub fn reveal<R: Runtime>(app: &AppHandle<R>) {
+    let Some(window) = app.get_webview_window(MAIN) else {
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    if let Some(svc) = app.try_state::<WindowService>()
+        && !svc.sized.swap(true, std::sync::atomic::Ordering::SeqCst)
+    {
+        let prefs = svc.prefs.lock().unwrap().clone();
+        let _ = apply_size(&window, &prefs);
+    }
+    let _ = window.set_focus();
 }
 
 fn apply_size<R: Runtime>(window: &WebviewWindow<R>, prefs: &WindowPrefs) -> tauri::Result<()> {
@@ -360,7 +379,17 @@ pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
                 .unwrap()
                 .record_size(logical.width, logical.height);
         }
-        WindowEvent::CloseRequested { .. } => svc.save(),
+        WindowEvent::CloseRequested { api, .. } => {
+            svc.save();
+            let keep = app
+                .try_state::<crate::settings_service::SettingsService>()
+                .is_some_and(|s| s.current().general.keep_in_tray);
+            if keep {
+                // Keep running in the tray so paired devices stay in sync.
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        }
         _ => {}
     }
 }

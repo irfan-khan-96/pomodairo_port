@@ -50,8 +50,25 @@ pub fn settings_save(
     settings.save(&svc.config)?;
     *svc.settings.lock().unwrap() = settings.clone();
     timer.apply_settings(&settings);
+    apply_launch_at_login(&app, settings.general.launch_at_login)?;
     let _ = app.emit(CHANGED_EVENT, &settings);
     Ok(settings)
+}
+
+/// Register or unregister Pomodairo to start when the user signs in.
+pub fn apply_launch_at_login(app: &AppHandle, enabled: bool) -> Result<()> {
+    use tauri_plugin_autostart::ManagerExt;
+    let launcher = app.autolaunch();
+    // Skip the call when already in the requested state (it touches the registry).
+    if launcher.is_enabled().unwrap_or(!enabled) == enabled {
+        return Ok(());
+    }
+    let result = if enabled {
+        launcher.enable()
+    } else {
+        launcher.disable()
+    };
+    result.map_err(|e| crate::error::Error::Invalid(format!("cannot change launch at login: {e}")))
 }
 
 /// Play a sound from the settings window. `file` is a custom sound, or `None` for the built-in one.
