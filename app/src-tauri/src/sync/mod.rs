@@ -2,6 +2,7 @@
 
 pub mod engine;
 pub mod hlc;
+pub mod peers;
 
 #[cfg(test)]
 mod tests;

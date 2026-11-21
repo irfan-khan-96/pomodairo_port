@@ -3,11 +3,13 @@ mod config;
 mod db;
 mod db_location;
 mod error;
+mod net;
 mod settings;
 mod settings_service;
 mod stats;
 mod stats_service;
 mod sync;
+mod sync_service;
 mod task_service;
 mod tasks;
 mod timer;
@@ -26,11 +28,17 @@ use window_service::WindowService;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // Debug builds with their own database (POMODAIRO_DB) may run side by side,
+    // e.g. two "devices" on one machine to test sync.
+    let side_by_side = cfg!(debug_assertions) && std::env::var_os("POMODAIRO_DB").is_some();
+    if !side_by_side {
         // Must be registered first: a second launch just brings this instance forward.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main(app);
-        }))
+        }));
+    }
+    builder
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -47,6 +55,10 @@ pub fn run() {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.show();
                 }
+            }
+            if let Err(e) = sync_service::init(app.handle()) {
+                // Sync is optional: the app works without it.
+                eprintln!("sync: unavailable: {e}");
             }
             if let Err(e) = tray::create(app.handle()) {
                 // Some Linux desktops have no tray; the app works without it.
@@ -86,6 +98,14 @@ pub fn run() {
             stats_service::stats_reality,
             stats_service::stats_hashtags,
             stats_service::open_stats_window,
+            sync_service::sync_status,
+            sync_service::sync_open_pairing,
+            sync_service::sync_cancel_pairing,
+            sync_service::sync_discover,
+            sync_service::sync_pair_with,
+            sync_service::sync_confirm_pairing,
+            sync_service::sync_unpair,
+            sync_service::sync_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

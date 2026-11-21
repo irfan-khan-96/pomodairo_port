@@ -51,9 +51,35 @@ impl TaskService {
         tasks::get(&inner.conn, id).ok().map(|t| t.name)
     }
 
-    /// Run a read-only query against the database.
+    /// Run a query (or a small self-contained write) against the database.
     pub fn read<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         f(&self.inner.lock().unwrap().conn)
+    }
+
+    /// Apply events received from another device. If anything changed, the
+    /// active task is re-checked (it may have been finished or deleted there)
+    /// and the UI is refreshed. Returns how many events were new.
+    pub fn ingest_remote(
+        &self,
+        app: &AppHandle,
+        events: &[crate::sync::engine::Event],
+    ) -> Result<usize> {
+        let mut inner = self.inner.lock().unwrap();
+        let new = crate::sync::engine::ingest(&inner.conn, events)?;
+        if new == 0 {
+            return Ok(0);
+        }
+        let still_open = inner
+            .active
+            .and_then(|id| tasks::get(&inner.conn, id).ok())
+            .is_some_and(|t| !t.done);
+        if !still_open {
+            inner.active = tasks::next_open(&inner.conn, inner.active)?;
+        }
+        let state = state_of(&inner)?;
+        drop(inner);
+        let _ = app.emit(CHANGED_EVENT, &state);
+        Ok(new)
     }
 
     /// Write a consistent copy of the database to `path` (used when moving it).
@@ -87,6 +113,7 @@ impl TaskService {
         let state = state_of(&inner)?;
         drop(inner);
         let _ = app.emit(CHANGED_EVENT, &state);
+        crate::sync_service::changed(app);
         Ok(state)
     }
 }
