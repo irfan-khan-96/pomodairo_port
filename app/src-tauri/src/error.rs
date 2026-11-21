@@ -21,6 +21,12 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Self {
+        Error::Invalid(format!("malformed data: {e}"))
+    }
+}
+
 impl From<rusqlite::Error> for Error {
     fn from(e: rusqlite::Error) -> Self {
         Error::Db(e)

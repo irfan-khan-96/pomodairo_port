@@ -27,6 +27,7 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
+uuid = { version = "1.29.3", features = ["v4"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -135,7 +135,7 @@ pub fn task_update(
     estimated: Option<i64>,
 ) -> Result<TaskState> {
     svc.mutate(&app, |inner| {
-        tasks::update(&inner.conn, id, &name, estimated).map(drop)
+        tasks::update(&inner.conn, id, &name, estimated, Utc::now()).map(drop)
     })
 }
 
@@ -183,7 +183,7 @@ pub fn task_set_done(
 pub fn task_delete(app: AppHandle, svc: State<'_, TaskService>, id: i64) -> Result<TaskState> {
     svc.mutate(&app, |inner| {
         let next = tasks::next_open(&inner.conn, Some(id))?;
-        tasks::delete(&inner.conn, id)?;
+        tasks::delete(&inner.conn, id, Utc::now())?;
         if inner.active == Some(id) {
             inner.active = next;
         }
@@ -197,12 +197,16 @@ pub fn task_reorder(
     svc: State<'_, TaskService>,
     ids: Vec<i64>,
 ) -> Result<TaskState> {
-    svc.mutate(&app, |inner| tasks::reorder(&mut inner.conn, &ids))
+    svc.mutate(&app, |inner| {
+        tasks::reorder(&mut inner.conn, &ids, Utc::now())
+    })
 }
 
 #[tauri::command]
 pub fn tasks_hide_done(app: AppHandle, svc: State<'_, TaskService>) -> Result<TaskState> {
-    svc.mutate(&app, |inner| tasks::hide_done(&inner.conn).map(drop))
+    svc.mutate(&app, |inner| {
+        tasks::hide_done(&inner.conn, Utc::now()).map(drop)
+    })
 }
 
 /// Log an unplanned item or interruption against the active task.

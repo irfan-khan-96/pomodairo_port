@@ -4,10 +4,11 @@
 //! tested against an in-memory database.
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
+use crate::sync::engine::{Op, in_tx, new_uid, record};
 
 pub const MAX_NAME_LEN: usize = 200;
 pub const MAX_ESTIMATE: i64 = 99;
@@ -21,7 +22,7 @@ pub enum TaskKind {
 }
 
 impl TaskKind {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             TaskKind::Pomodoro => "pomodoro",
             TaskKind::Unplanned => "unplanned",
@@ -29,7 +30,7 @@ impl TaskKind {
         }
     }
 
-    fn parse(s: &str) -> rusqlite::Result<Self> {
+    pub(crate) fn parse(s: &str) -> rusqlite::Result<Self> {
         match s {
             "pomodoro" => Ok(TaskKind::Pomodoro),
             "unplanned" => Ok(TaskKind::Unplanned),
@@ -88,7 +89,7 @@ pub fn timestamp(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-fn validate_name(name: &str) -> Result<String> {
+pub(crate) fn validate_name(name: &str) -> Result<String> {
     let name = name.trim();
     if name.is_empty() {
         return Err(Error::Invalid("name must not be empty".into()));
@@ -101,7 +102,7 @@ fn validate_name(name: &str) -> Result<String> {
     Ok(name.to_string())
 }
 
-fn validate_estimate(estimated: Option<i64>) -> Result<Option<i64>> {
+pub(crate) fn validate_estimate(estimated: Option<i64>) -> Result<Option<i64>> {
     match estimated {
         Some(e) if !(0..=MAX_ESTIMATE).contains(&e) => Err(Error::Invalid(format!(
             "estimate must be between 0 and {MAX_ESTIMATE}"
@@ -114,7 +115,7 @@ fn validate_estimate(estimated: Option<i64>) -> Result<Option<i64>> {
 pub fn list(conn: &Connection) -> Result<Vec<Task>> {
     let mut stmt = conn.prepare_cached(&format!(
         "SELECT {COLUMNS} FROM task WHERE visible = 1 AND kind IN ('pomodoro', 'unplanned') \
-         ORDER BY ordinal, id"
+         ORDER BY ordinal, created_at, uid"
     ))?;
     let tasks = stmt
         .query_map([], from_row)?
@@ -132,37 +133,59 @@ pub fn get(conn: &Connection, id: i64) -> Result<Task> {
     .ok_or(Error::NotFound)
 }
 
+/// Create a task through the sync engine and return it.
 fn insert(
     conn: &Connection,
     kind: TaskKind,
     name: &str,
     estimated: Option<i64>,
-    parent_id: Option<i64>,
+    parent_uid: Option<String>,
     now: DateTime<Utc>,
 ) -> Result<Task> {
     let name = validate_name(name)?;
     let estimated = validate_estimate(estimated)?;
-    // New list items go to the bottom.
-    let ordinal: i64 = if kind.listed() {
-        conn.query_row("SELECT COALESCE(MAX(ordinal), -1) + 1 FROM task", [], |r| {
-            r.get(0)
-        })?
-    } else {
-        0
-    };
-    conn.execute(
-        "INSERT INTO task (name, kind, parent_id, estimated, ordinal, created_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![
-            name,
-            kind.as_str(),
-            parent_id,
-            estimated,
-            ordinal,
-            timestamp(now)
-        ],
-    )?;
-    get(conn, conn.last_insert_rowid())
+    in_tx(conn, |conn| {
+        // New list items go to the bottom.
+        let ordinal: i64 = if kind.listed() {
+            conn.query_row("SELECT COALESCE(MAX(ordinal), -1) + 1 FROM task", [], |r| {
+                r.get(0)
+            })?
+        } else {
+            0
+        };
+        let uid = new_uid();
+        record(
+            conn,
+            Op::CreateTask {
+                uid: uid.clone(),
+                kind,
+                name,
+                estimated,
+                parent_uid,
+                created_at: timestamp(now),
+                ordinal,
+            },
+            now,
+        )?;
+        get_by_uid(conn, &uid)
+    })
+}
+
+fn get_by_uid(conn: &Connection, uid: &str) -> Result<Task> {
+    conn.query_row(
+        &format!("SELECT {COLUMNS} FROM task WHERE uid = ?1"),
+        [uid],
+        from_row,
+    )
+    .optional()?
+    .ok_or(Error::NotFound)
+}
+
+/// The global id of a task (what other devices know it by).
+fn uid_of(conn: &Connection, id: i64) -> Result<String> {
+    conn.query_row("SELECT uid FROM task WHERE id = ?1", [id], |r| r.get(0))
+        .optional()?
+        .ok_or(Error::NotFound)
 }
 
 pub fn create(
@@ -174,7 +197,8 @@ pub fn create(
     insert(conn, TaskKind::Pomodoro, name, estimated, None, now)
 }
 
-/// Record an unplanned item or interruption against `parent_id` and bump the parent's counter.
+/// Record an unplanned item or interruption against `parent_id`; the parent's
+/// count follows from it.
 pub fn log_disturbance(
     conn: &mut Connection,
     parent_id: i64,
@@ -183,82 +207,119 @@ pub fn log_disturbance(
     estimated: Option<i64>,
     now: DateTime<Utc>,
 ) -> Result<Task> {
-    let counter = match kind {
-        TaskKind::Unplanned => "unplanned",
-        TaskKind::Interruption => "interruptions",
-        TaskKind::Pomodoro => {
-            return Err(Error::Invalid(
-                "not an unplanned item or interruption".into(),
-            ));
-        }
-    };
+    if kind == TaskKind::Pomodoro {
+        return Err(Error::Invalid(
+            "not an unplanned item or interruption".into(),
+        ));
+    }
     let estimated = if kind == TaskKind::Interruption {
         None
     } else {
         estimated
     };
-    let tx = conn.transaction()?;
-    get(&tx, parent_id)?;
-    let item = insert(&tx, kind, name, estimated, Some(parent_id), now)?;
-    tx.execute(
-        &format!("UPDATE task SET {counter} = {counter} + 1 WHERE id = ?1"),
-        [parent_id],
-    )?;
-    tx.commit()?;
-    Ok(item)
+    in_tx(conn, |conn| {
+        let parent_uid = uid_of(conn, parent_id)?;
+        insert(conn, kind, name, estimated, Some(parent_uid), now)
+    })
 }
 
-pub fn update(conn: &Connection, id: i64, name: &str, estimated: Option<i64>) -> Result<Task> {
+pub fn update(
+    conn: &Connection,
+    id: i64,
+    name: &str,
+    estimated: Option<i64>,
+    now: DateTime<Utc>,
+) -> Result<Task> {
     let name = validate_name(name)?;
     let estimated = validate_estimate(estimated)?;
-    let changed = conn.execute(
-        "UPDATE task SET name = ?1, estimated = ?2 WHERE id = ?3",
-        params![name, estimated, id],
-    )?;
-    if changed == 0 {
-        return Err(Error::NotFound);
-    }
-    get(conn, id)
+    in_tx(conn, |conn| {
+        let current = get(conn, id)?;
+        let uid = uid_of(conn, id)?;
+        // Only changed fields become events, so an unrelated edit on another
+        // device is not overwritten.
+        if current.name != name {
+            record(
+                conn,
+                Op::SetName {
+                    uid: uid.clone(),
+                    name,
+                },
+                now,
+            )?;
+        }
+        if current.estimated != estimated {
+            record(conn, Op::SetEstimate { uid, estimated }, now)?;
+        }
+        get(conn, id)
+    })
 }
 
 pub fn set_done(conn: &Connection, id: i64, done: bool, now: DateTime<Utc>) -> Result<Task> {
-    let closed_at = done.then(|| timestamp(now));
-    let changed = conn.execute(
-        "UPDATE task SET done = ?1, closed_at = ?2 WHERE id = ?3",
-        params![done, closed_at, id],
-    )?;
-    if changed == 0 {
-        return Err(Error::NotFound);
-    }
-    get(conn, id)
+    in_tx(conn, |conn| {
+        let uid = uid_of(conn, id)?;
+        let closed_at = done.then(|| timestamp(now));
+        record(
+            conn,
+            Op::SetDone {
+                uid,
+                done,
+                closed_at,
+            },
+            now,
+        )?;
+        get(conn, id)
+    })
 }
 
-pub fn delete(conn: &Connection, id: i64) -> Result<()> {
-    if conn.execute("DELETE FROM task WHERE id = ?1", [id])? == 0 {
-        return Err(Error::NotFound);
-    }
-    Ok(())
+pub fn delete(conn: &Connection, id: i64, now: DateTime<Utc>) -> Result<()> {
+    in_tx(conn, |conn| {
+        let uid = uid_of(conn, id)?;
+        record(conn, Op::DeleteTask { uid }, now)?;
+        Ok(())
+    })
 }
 
-/// Set list order to match `ids` (first id = top of the list).
-pub fn reorder(conn: &mut Connection, ids: &[i64]) -> Result<()> {
-    let tx = conn.transaction()?;
-    {
-        let mut stmt = tx.prepare("UPDATE task SET ordinal = ?1 WHERE id = ?2")?;
-        for (ordinal, id) in ids.iter().enumerate() {
-            stmt.execute(params![ordinal as i64, id])?;
+/// Set list order to match `ids` (first id = top of the list). Unknown ids are skipped.
+pub fn reorder(conn: &mut Connection, ids: &[i64], now: DateTime<Utc>) -> Result<()> {
+    in_tx(conn, |conn| {
+        for (ordinal, &id) in ids.iter().enumerate() {
+            let Ok(task) = get(conn, id) else { continue };
+            if task.ordinal != ordinal as i64 {
+                let uid = uid_of(conn, id)?;
+                record(
+                    conn,
+                    Op::SetOrdinal {
+                        uid,
+                        ordinal: ordinal as i64,
+                    },
+                    now,
+                )?;
+            }
         }
-    }
-    tx.commit()?;
-    Ok(())
+        Ok(())
+    })
 }
 
 /// "Clean all done": hide finished tasks from the list (they stay in the statistics).
-pub fn hide_done(conn: &Connection) -> Result<usize> {
-    Ok(conn.execute(
-        "UPDATE task SET visible = 0 WHERE done = 1 AND visible = 1",
-        [],
-    )?)
+pub fn hide_done(conn: &Connection, now: DateTime<Utc>) -> Result<usize> {
+    in_tx(conn, |conn| {
+        let mut stmt = conn.prepare("SELECT uid FROM task WHERE done = 1 AND visible = 1")?;
+        let uids: Vec<String> = stmt
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        for uid in &uids {
+            record(
+                conn,
+                Op::SetVisible {
+                    uid: uid.clone(),
+                    visible: false,
+                },
+                now,
+            )?;
+        }
+        Ok(uids.len())
+    })
 }
 
 /// Log a completed pomodoro and credit it to `task_id`, if any.
@@ -268,19 +329,20 @@ pub fn record_pomodoro(
     started: DateTime<Utc>,
     ended: DateTime<Utc>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
-    tx.execute(
-        "INSERT INTO pomodoro_log (task_id, started_at, ended_at) VALUES (?1, ?2, ?3)",
-        params![task_id, timestamp(started), timestamp(ended)],
-    )?;
-    if let Some(id) = task_id {
-        tx.execute(
-            "UPDATE task SET pomodoros = pomodoros + 1 WHERE id = ?1",
-            [id],
+    in_tx(conn, |conn| {
+        let task_uid = task_id.map(|id| uid_of(conn, id)).transpose()?;
+        record(
+            conn,
+            Op::LogPomodoro {
+                uid: new_uid(),
+                task_uid,
+                started_at: timestamp(started),
+                ended_at: timestamp(ended),
+            },
+            ended,
         )?;
-    }
-    tx.commit()?;
-    Ok(())
+        Ok(())
+    })
 }
 
 /// The open (not done) task after `current` in list order, wrapping to the top.
@@ -338,7 +400,7 @@ mod tests {
             Err(Error::Invalid(_))
         ));
         assert!(matches!(
-            update(&conn, 999, "x", None),
+            update(&conn, 999, "x", None, now()),
             Err(Error::NotFound)
         ));
     }
@@ -412,7 +474,7 @@ mod tests {
         let a = create(&conn, "A", None, now()).unwrap();
         create(&conn, "B", None, now()).unwrap();
         set_done(&conn, a.id, true, now()).unwrap();
-        assert_eq!(hide_done(&conn).unwrap(), 1);
+        assert_eq!(hide_done(&conn, now()).unwrap(), 1);
         assert_eq!(names(&conn), ["B"]);
         assert!(
             get(&conn, a.id).is_ok(),
@@ -426,7 +488,7 @@ mod tests {
         let a = create(&conn, "A", None, now()).unwrap();
         let b = create(&conn, "B", None, now()).unwrap();
         let c = create(&conn, "C", None, now()).unwrap();
-        reorder(&mut conn, &[c.id, a.id, b.id]).unwrap();
+        reorder(&mut conn, &[c.id, a.id, b.id], now()).unwrap();
         assert_eq!(names(&conn), ["C", "A", "B"]);
         create(&conn, "D", None, now()).unwrap();
         assert_eq!(names(&conn), ["C", "A", "B", "D"]);
@@ -451,13 +513,13 @@ mod tests {
         let t = create(&conn, "A", None, now()).unwrap();
         let u = log_disturbance(&mut conn, t.id, TaskKind::Unplanned, "U", None, now()).unwrap();
         record_pomodoro(&mut conn, Some(t.id), now(), now()).unwrap();
-        delete(&conn, t.id).unwrap();
+        delete(&conn, t.id, now()).unwrap();
         assert_eq!(get(&conn, u.id).unwrap().parent_id, None);
         let orphan: Option<i64> = conn
             .query_row("SELECT task_id FROM pomodoro_log", [], |r| r.get(0))
             .unwrap();
         assert_eq!(orphan, None);
-        assert!(matches!(delete(&conn, t.id), Err(Error::NotFound)));
+        assert!(matches!(delete(&conn, t.id, now()), Err(Error::NotFound)));
     }
 
     #[test]

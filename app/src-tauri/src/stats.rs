@@ -453,7 +453,7 @@ mod tests {
             ["Phone #calls", "Hotfix"]
         );
         assert_eq!(d[0].task.as_deref(), Some("Main"));
-        tasks::delete(&conn, t.id).unwrap();
+        tasks::delete(&conn, t.id, at("2026-10-21T00:00:00Z")).unwrap();
         let d = disturbances(&conn, range("2026-10-20", "2026-10-20"), "phone", &tz()).unwrap();
         assert_eq!(d[0].task, None, "parent deleted");
     }

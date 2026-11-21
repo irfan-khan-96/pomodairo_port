@@ -7,6 +7,7 @@ mod settings;
 mod settings_service;
 mod stats;
 mod stats_service;
+mod sync;
 mod task_service;
 mod tasks;
 mod timer;

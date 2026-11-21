@@ -302,7 +302,10 @@ mod tests {
     fn built_in_sounds_decode() {
         for kind in [SoundKind::Alarm, SoundKind::BreakEnd, SoundKind::Ticking] {
             let decoder = Decoder::new(Cursor::new(builtin(kind))).expect("decodes");
-            assert!(decoder.total_duration().is_some_and(|d| d > Duration::ZERO), "{kind:?}");
+            assert!(
+                decoder.total_duration().is_some_and(|d| d > Duration::ZERO),
+                "{kind:?}"
+            );
         }
     }
 

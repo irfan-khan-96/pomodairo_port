@@ -13,6 +13,7 @@ Milestones 1–8 are implemented. Differences from the plan below, decided along
 - **`schema_version` table → `PRAGMA user_version`** for migrations.
 - **Statistics "Count" view** counts pomodoros from the pomodoro log by the day they were completed. The original counted by the day the task was created.
 - **Icon and sounds** are original and generated from source: a "segment tomato" app icon (SVG), a live progress-ring tray icon drawn in Rust, and a synthesised "soft digital" sound set with a distinct break-over chime.
+- **Device sync (in progress), no cloud, built in.** Phase 1 done: every change is an event (`sync_event`) with a hybrid logical clock; the task tables are materialised from events. Newest edit wins per field, deletion is final, and pomodoro/unplanned/interruption counts are derived from logged items, so work on several devices adds up. Existing databases are backed up (`pomodairo.db.v1.bak`) and converted on first start. Next: phase 2, LAN sync (discovery, numeric-comparison pairing, TLS 1.3 with pinned certificates, private networks only), then phase 3, the Devices tab and the hand-off indicator.
 - **Not yet done:** code signing, auto-update.
 
 ## 1. Decisions
