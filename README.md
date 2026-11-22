@@ -68,31 +68,11 @@ From `app/`, `npm run tauri build` builds the installers for the current OS into
 | macOS | `macos/Pomodairo.app`, `dmg/Pomodairo_<version>_<arch>.dmg` |
 | Debian / Ubuntu | `deb/Pomodairo_<version>_amd64.deb` (Debian 12+, Ubuntu 22.04+) |
 
-GitHub Actions (`.github/workflows/build.yml`) builds all three on every push and pull
-request and attaches the installers to the run. To make a release, bump `version` in
-`app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml` and `app/package.json`, then
-push a tag such as `v0.2.1`; the workflow creates a draft GitHub release with the
-installers attached.
-
 The installers are not code-signed yet, so Windows SmartScreen and macOS Gatekeeper
-will warn on first launch.
+will warn on first launch. Installed copies on Windows and macOS update themselves
+(Settings → General → "Check for updates automatically").
 
-### Updates
-
-Installed copies check `latest.json` on the repository's latest published GitHub
-release (shortly after start, then every 6 hours; can be turned off in Settings →
-General) and offer to install a newer version. Tag builds produce the signed update
-packages and `latest.json`; this needs two repository secrets:
-
-| Secret | Value |
-|---|---|
-| `TAURI_SIGNING_PRIVATE_KEY` | Contents of the update signing key (kept outside the repo) |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Its password (empty if none) |
-
-The matching public key is in `app/src-tauri/tauri.conf.json`; updates signed with any
-other key are refused, so keep the private key backed up. Releases must be public for
-the download to work, and a release only becomes "latest" once it is published (not
-a draft). The `.deb` has no automatic updates: install the new `.deb` by hand.
+Making a release is described in [RELEASING.md](RELEASING.md).
 
 ## Project layout
 
@@ -103,6 +83,7 @@ app/
   src-tauri/migrations SQLite schema
   scripts/             Icon and sound generators
 PLAN.md                Design decisions and milestones
+RELEASING.md           How to make a release
 ```
 
 ## License
